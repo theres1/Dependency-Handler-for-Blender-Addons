@@ -131,24 +131,6 @@ def _log(*msg: list):
     for printer in all_printers:
         printer.log(msg)
 
-'''
-# WORKING yielding
-from subprocess import Popen, PIPE, CalledProcessError
-import sys
-pybin = sys.executable
-cmd = [pybin, '-m', 'pip', 'list']
-def gen():
-    with Popen(cmd, stdout=PIPE, bufsize=1, universal_newlines=True) as p:
-        for line in p.stdout:
-            # print(line, end='') # process line here
-            yield line
-
-    if p.returncode != 0:
-        raise CalledProcessError(p.returncode, p.args)
-
-for l in gen():
-    print(l, end='')
-'''
 def _execute(args: list[str]) -> Generator[str, None, None]:
     with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True) as p:
         for line in p.stdout:
@@ -278,7 +260,7 @@ class PrinterInterface(metaclass=abc.ABCMeta):
     def prepare(self) -> None:
         """Clears buffer. Prepares to receive data."""
         raise NotImplementedError
-
+    
     @abc.abstractmethod
     def finish(self) -> None:
         """Finish"""
