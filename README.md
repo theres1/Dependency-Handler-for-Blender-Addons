@@ -1,6 +1,8 @@
 # Dependency-Handler-for-Blender-Addons
 ## Automatic module installation via pip, handling exceptions, configurable output printing in Blender addons.
 
+[![Real time logging](https://img.youtube.com/vi/zgJLy2tE1-0/0.jpg)](https://www.youtube.com/watch?v=zgJLy2tE1-0)
+
 Module that allows easy handling of dependencies, created mainly for Blender add-ons.
 
 Usage Examples:
@@ -55,7 +57,7 @@ install_all()/install_all_generator() function starts generating logs that will 
 Use blender_printer.install_operator_factory factory to create an operator that will handle drawing logs in real time.
 Blender will be responsive during modules installation and pip logs will be printed immediately in new window.
 ```
-OT_ModalInstall = dependency_handler.blender_printer.install_operator_factory(bl_info['name'])
+OT_ThreadedInstall = dependency_handler.blender_printer.install_operator_factory(bl_info['name'])
 
 class OBJECT_PT_DepAddonExample(bpy.types.Panel):
     bl_label = "Dependency Addon Example"
@@ -68,5 +70,5 @@ class OBJECT_PT_DepAddonExample(bpy.types.Panel):
         if dp.DEPENDENCIES_IMPORTED:
             layout.label(text="All imported")
         else:
-            layout.operator(OT_ModalInstall.bl_idname)
+            layout.operator(OT_ThreadedInstall.bl_idname)
 ```

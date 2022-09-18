@@ -53,7 +53,7 @@ install_all()/install_all_generator() function starts generating logs that will 
 Use blender_printer.install_operator_factory factory to create an operator that will handle drawing logs in real time.
 Blender will be responsive during modules installation and pip logs will be printed immediately in new window.
 ```
-OT_ModalInstall = dependency_handler.blender_printer.install_operator_factory(bl_info['name'])
+OT_ThreadedInstall = dependency_handler.blender_printer.install_operator_factory(bl_info['name'])
 
 class OBJECT_PT_DepAddonExample(bpy.types.Panel):
     bl_label = "Dependency Addon Example"
@@ -66,7 +66,7 @@ class OBJECT_PT_DepAddonExample(bpy.types.Panel):
         if dp.DEPENDENCIES_IMPORTED:
             layout.label(text="All imported")
         else:
-            layout.operator(OT_ModalInstall.bl_idname)
+            layout.operator(OT_ThreadedInstall.bl_idname)
 ```
 '''
 import abc
@@ -103,7 +103,6 @@ def _ensure_pip():
         try:
             _log("----- Upgrading PIP -----")
             yield from _execute([pybin, "-m", "pip", "install", "--upgrade", "pip"])
-            # [_ for _ in _execute([pybin, "-m", "pip", "install", "--upgrade", "pip"])]
         except subprocess.CalledProcessError as e:
             _log('Error: Pip module could not be upgraded. Using existing version.')
             _log(e.stderr)
@@ -115,13 +114,9 @@ def _ensure_pip():
         try:
             yield from _execute([pybin, "-m", "ensurepip"])
             yield from _execute([pybin, "-m", "pip", "install", "--upgrade", "pip"])
-            # sys.path.append(site.getusersitepackages())
-            # importlib.import_module('pip')
             pip_ensured = True
         except subprocess.CalledProcessError as e:
             raise ModuleFatalException(f"Pip Fatal Exception: {e}")
-        # except ModuleNotFoundError:
-        #     raise ModuleFatalException('Pip installation finished but import failed. Please restart Blender.')
         
         _log("Done.")
 
@@ -141,14 +136,6 @@ def _execute(args: list[str]) -> Generator[str, None, None]:
         _log(f"Exit code: {p.returncode}")
         raise subprocess.CalledProcessError(p.returncode, p.args)
 
-    # proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    # for line in io.TextIOWrapper(proc.stdout, encoding="utf-8"):  # or another encoding
-    #     _log('>>', line)
-    # exit_code = proc.wait()
-    # if exit_code:
-    #     _log(f"Exit code: {exit_code}")
-    #     raise subprocess.CalledProcessError(returncode=exit_code, cmd=" ".join(args))
-
 @dataclass
 class Dependency:
     '''A class representing a Dependency. For internal use mainly.'''
@@ -162,7 +149,6 @@ class Dependency:
         all_dependencies[self.name] = self
         if not self.pip_name:
             self.pip_name = self.name
-        # other_globals['test'] = 10
 
         try:
             module = importlib.import_module(self.name)
@@ -187,7 +173,6 @@ class Dependency:
         yield from _ensure_pip()
         _log("\n----- Installing ", self.pip_name, "-----")
         try:
-            # subprocess.run([pybin, "-m", "pip", "install", "--upgrade", "--user", self.name], capture_output=True, text=True, check=True)
             yield from _execute([pybin, "-m", "pip", "install", "--upgrade", "--user", self.pip_name])
             self.installed = True
             try:
@@ -199,7 +184,6 @@ class Dependency:
             except ModuleNotFoundError:
                 estr = f'{self.pip_name} installation finished but {self.name} import failed. Try restarting Blender.'
                 _log(estr)
-                # raise ModuleFatalException(estr)
         except subprocess.CalledProcessError as e:
             _log(f'{self.pip_name} module installation failed.')
         

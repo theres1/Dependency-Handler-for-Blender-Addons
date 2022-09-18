@@ -42,14 +42,14 @@ class OBJECT_PT_DepAddonExample(bpy.types.Panel):
         if dp.DEPENDENCIES_IMPORTED:
             layout.label(text="All imported")
         else:
-            layout.operator(OT_ModalInstall.bl_idname)
+            layout.operator(OT_ThreadedInstall.bl_idname)
 
 # Use factory to create operator that will handle drawing logs in real time.
 # Blender will be responsive during modules installation and pip logs will be printed immediately in new window.
-OT_ModalInstall = install_operator_factory(bl_info['name'])
+OT_ThreadedInstall = install_operator_factory(bl_info['name'])
 
 classes = {
-    OT_ModalInstall,
+    OT_ThreadedInstall,
     OBJECT_PT_DepAddonExample
 }
 
