@@ -4,47 +4,54 @@ Module that allows easy handling of dependencies, created mainly for Blender add
 Usage Examples:
 
 Import output printing front-ends:
-
+```
     from . dependency_handler.blender_printer import BlenderPrinter
     from . dependency_handler import FilePrinter
-
-BlenderPrinter - creates a new Blender window with Text Editor and writes logs into text file
-FilePrinter - writes logs into text file. By default, text file is created next in Path(__file__).parent path.
-
+```
+BlenderPrinter - creates a new Blender window with Text Editor and writes logs into text file.
+FilePrinter - writes logs into text file. By default, text file is created next to __file__.
+```
     from . import dependency_handler
     from . dependency_handler import FROM, IMPORT
-
+```
 Initialise dependencies. Already installed modules will be imported during initialisation.
-
-    dependency_handler.init([('PIL', 'Pillow'), 'pyexiv2'], module_globals=globals(), printers=[BlenderPrinter("Dependency Log of My Addon"), FilePrinter()])
+```
+    dependency_handler.init([('PIL', 'Pillow'), 'AnyModule'], module_globals=globals(), printers=[BlenderPrinter("Dependency Log of My Addon"), FilePrinter()])
     FROM('PIL').IMPORT('ImageCms', 'Image') # or FROM(('PIL', 'Pillow')).IMPORT('ImageCms', 'Image')
-    IMPORT('Non-Existing-Module')
-
+    IMPORT('AnyModule2')
+```
 Dependencies can be initialised by init, FROM and IMPORT functions. Use tuple (module_name, pip_name) for modules that need different names for pip installing and importing.
 Pass globals() as a module_globals parameter to import modules into global namespace.
 State of all dependencies can be tracked by dependency_handler.check_all_loaded() function returning True if all dependencies are imported.
-    
+```    
     DEPS_IMPORTED = dependency_handler.check_all_loaded()
-
-Another option is track initialisation functions returns:
-
-    DEPS_IMPORTED = dependency_handler.init(['pyexiv2'], module_globals=globals())
+```
+Another option is to track returns of initialisation functions:
+```
+    DEPS_IMPORTED = dependency_handler.init(['AnyModule'], module_globals=globals())
     DEPS_IMPORTED &= FROM(('PIL', 'Pillow')).IMPORT('ImageCms', 'Image')
     DEPS_IMPORTED &= IMPORT('Non-Existing-Module')
-
-Modules loaded into global namespace are freely available but are not visible for code completion.
+```
+It is also possible to use dependency_handler.DEPENDENCIES_IMPORTED variable that is updated by install_all(), install_all_generator() and check_all_loaded() functions.
+Modules loaded into global namespace are freely available but are not visible to code completion.
 To make them accessible, import them once again like this:
-
-    if DEPS_IMPORTED:
-        import pyexiv2
+```
+    if dependency_handler.DEPENDENCIES_IMPORTED:
+        import AnyModule
         from PIL import ImageCms, Image
-
+```
 Missing modules can be installed in a time of your choosing like this:
+```
+    DEPS_IMPORTED = dependency_handler.install_all()
+    # or use a generator function
+    for _ in dependency_handler.install_all_generator():
+        do_something_between_lines()
+```
+install_all()/install_all_generator() function starts generating logs that will be presented in chosen front-ends.
 
-        global DEPS_IMPORTED
-        DEPS_IMPORTED = dependency_handler.install_all()
+#### Blender specific usage
 
-dependency_handler.install_all() function starts generating logs that will be presented in chosen front-ends.
+
 '''
 import abc
 from dataclasses import dataclass, field
@@ -53,8 +60,10 @@ from pathlib import Path
 import subprocess
 import sys
 import io
+from typing import Generator
 
 pybin = sys.executable
+DEPENDENCIES_IMPORTED = False
 
 class DepndencyHandlerException(Exception):
     def __init__(self, message="Module Fatal Exception"):
@@ -77,7 +86,8 @@ def _ensure_pip():
         # update pip
         try:
             _log("----- Upgrading PIP -----")
-            _execute([pybin, "-m", "pip", "install", "--upgrade", "pip"])
+            yield from _execute([pybin, "-m", "pip", "install", "--upgrade", "pip"])
+            # [_ for _ in _execute([pybin, "-m", "pip", "install", "--upgrade", "pip"])]
         except subprocess.CalledProcessError as e:
             _log('Error: Pip module could not be upgraded. Using existing version.')
             _log(e.stderr)
@@ -87,8 +97,8 @@ def _ensure_pip():
         _log("\n----- Pip python package not found. Installing. -----")
         
         try:
-            _execute([pybin, "-m", "ensurepip"])
-            _execute([pybin, "-m", "pip", "install", "--upgrade", "pip"])
+            yield from _execute([pybin, "-m", "ensurepip"])
+            yield from _execute([pybin, "-m", "pip", "install", "--upgrade", "pip"])
             # sys.path.append(site.getusersitepackages())
             # importlib.import_module('pip')
             pip_ensured = True
@@ -105,14 +115,41 @@ def _log(*msg: list):
     for printer in all_printers:
         printer.log(msg)
 
-def _execute(args: list[str]):
-    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    for line in io.TextIOWrapper(proc.stdout, encoding="utf-8"):  # or another encoding
-        _log('>>', line)
-    exit_code = proc.wait()
-    if exit_code:
-        _log(f"Exit code: {exit_code}")
-        raise subprocess.CalledProcessError(returncode=exit_code, cmd=" ".join(args))
+'''
+# WORKING yielding
+from subprocess import Popen, PIPE, CalledProcessError
+import sys
+pybin = sys.executable
+cmd = [pybin, '-m', 'pip', 'list']
+def gen():
+    with Popen(cmd, stdout=PIPE, bufsize=1, universal_newlines=True) as p:
+        for line in p.stdout:
+            # print(line, end='') # process line here
+            yield line
+
+    if p.returncode != 0:
+        raise CalledProcessError(p.returncode, p.args)
+
+for l in gen():
+    print(l, end='')
+'''
+def _execute(args: list[str]) -> Generator[str, None, None]:
+    with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True) as p:
+        for line in p.stdout:
+            _log('>>', line)
+            yield line
+
+    if p.returncode != 0:
+        _log(f"Exit code: {p.returncode}")
+        raise subprocess.CalledProcessError(p.returncode, p.args)
+
+    # proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    # for line in io.TextIOWrapper(proc.stdout, encoding="utf-8"):  # or another encoding
+    #     _log('>>', line)
+    # exit_code = proc.wait()
+    # if exit_code:
+    #     _log(f"Exit code: {exit_code}")
+    #     raise subprocess.CalledProcessError(returncode=exit_code, cmd=" ".join(args))
 
 @dataclass
 class Dependency:
@@ -149,11 +186,11 @@ class Dependency:
     def install_me(self):
         if self.imported:
             return True
-        _ensure_pip()
+        yield from _ensure_pip()
         _log("\n----- Installing ", self.pip_name, "-----")
         try:
             # subprocess.run([pybin, "-m", "pip", "install", "--upgrade", "--user", self.name], capture_output=True, text=True, check=True)
-            _execute([pybin, "-m", "pip", "install", "--upgrade", "--user", self.pip_name])
+            yield from _execute([pybin, "-m", "pip", "install", "--upgrade", "--user", self.pip_name])
             self.installed = True
             try:
                 module = importlib.import_module(self.name)
@@ -225,6 +262,11 @@ class PrinterInterface(metaclass=abc.ABCMeta):
     def prepare(self) -> None:
         """Clears buffer. Prepares to receive data."""
         raise NotImplementedError
+
+    @abc.abstractmethod
+    def finish(self) -> None:
+        """Finish"""
+        raise NotImplementedError
     
     def catch_exceptions(use_fallback_log=True):
         '''
@@ -255,10 +297,17 @@ class ConsolePrinter(PrinterInterface):
         # Do nothing
         return
 
+    @PrinterInterface.catch_exceptions(use_fallback_log=True)
+    def finish(self):
+        # Do nothing
+        return
+
 class FilePrinter(PrinterInterface):
     def __init__(self, filepath: str=None):
         if not filepath:
             self.filepath = Path(__file__).parent / 'dependency_pip_report.txt'
+        else:
+            self.filepath = filepath
 
     @PrinterInterface.catch_exceptions(use_fallback_log=True)
     def log(self, *msg: list):
@@ -270,6 +319,11 @@ class FilePrinter(PrinterInterface):
     def prepare(self):
         with open(self.filepath, 'w'):
             pass
+
+    @PrinterInterface.catch_exceptions(use_fallback_log=True)
+    def finish(self):
+        # Do nothing
+        return
 
 all_printers: list[PrinterInterface] = []
 
@@ -305,14 +359,29 @@ def init(dependencies: list[str | tuple[str, str]]=None, /, *, module_globals: d
     
 def install_all():
     '''
-    Installs all initialized dependencies. Returns True if all dependencies are installed and loaded. Saves error log next to the module file if installation and import failed.
+    Installs all initialized dependencies. Returns True if all dependencies are installed and loaded.
     May throw SubModuleNotFound exception and ModuleFatalException when PIP cannot be installed.
     '''
+    for _ in install_all_generator(): pass
+    return check_all_loaded()
+
+def install_all_generator():
+    '''
+    Generator function. Installs all initialized dependencies.
+    May throw SubModuleNotFound exception and ModuleFatalException when PIP cannot be installed.
+    Use it when you need to print output in real time.
+
+    This function does not return successful loading of modules, so use check_all_loaded() instead.
+    '''
+
     for printer in all_printers:
         printer.prepare()
     
     try:
-        if all({dependency.install_me() for dependency in all_dependencies.values()}):
+        for dependency in all_dependencies.values():
+            yield from dependency.install_me()
+        
+        if check_all_loaded():
             _log("\n\n---------- Installation Successful ----------")
             return True
     except SubModuleNotFound as e:
@@ -348,13 +417,14 @@ def install_all():
         _log(f' platform.processor: {platform.processor()}')
 
         _log("\n\n---------- Installation Failed ----------")
-        _log("Please restart Blender and try again or save and show this log to the developer.")
     
     return False
 
 def check_all_loaded() -> bool:
     '''Returns True if all initialized dependencies were successfully loaded and False otherwise.'''
-    return not any(not dep.imported for dep in all_dependencies.values())
+    global DEPENDENCIES_IMPORTED
+    DEPENDENCIES_IMPORTED = all(dep.imported for dep in all_dependencies.values())
+    return DEPENDENCIES_IMPORTED
 
 if __name__ == "__main__":
     # deps_installed = init([('PIL', 'Pillow'), 'pyexiv2'], globals=globals())
@@ -365,6 +435,7 @@ if __name__ == "__main__":
     deps_installed = init(['pyexiv2'], module_globals=globals(), printers=[FilePrinter(),])
     FROM(('PIL', 'Pillow')).IMPORT('Image', 'ImageCms')
     IMPORT('Non-Existing-Module')
-    print('check all:', check_all_loaded())
-    install_all()
-    print(ImageCms)
+    # print('check all:', check_all_loaded())
+    print('install_all generator:', [_ for _ in install_all_generator()])
+    # print('### install_all:', install_all())
+    # print(ImageCms)
