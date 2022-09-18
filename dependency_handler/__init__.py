@@ -50,9 +50,9 @@ Missing modules can be installed in a time of your choosing like this:
 install_all()/install_all_generator() function starts generating logs that will be presented in chosen front-ends.
 
 #### Blender specific usage
+Use blender_printer.install_operator_factory factory to create an operator that will handle drawing logs in real time.
+Blender will be responsive during modules installation and pip logs will be printed immediately in new window.
 ```
-# Use factory to create modal operator that will handle drawing logs in real time.
-# Blender will not be responsive during modules installation but pip logs will be printed immediately.
 OT_ModalInstall = dependency_handler.blender_printer.install_operator_factory(bl_info['name'])
 
 class OBJECT_PT_DepAddonExample(bpy.types.Panel):
@@ -135,7 +135,7 @@ def _execute(args: list[str]) -> Generator[str, None, None]:
     with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True) as p:
         for line in p.stdout:
             _log('>>', line)
-            yield line
+            yield
 
     if p.returncode != 0:
         _log(f"Exit code: {p.returncode}")
@@ -415,6 +415,9 @@ def install_all_generator():
         _log(f' platform.processor: {platform.processor()}')
 
         _log("\n\n---------- Installation Failed ----------")
+
+        for printer in all_printers:
+            printer.finish()
     
     return False
 

@@ -44,8 +44,8 @@ class OBJECT_PT_DepAddonExample(bpy.types.Panel):
         else:
             layout.operator(OT_ModalInstall.bl_idname)
 
-# Use factory to create modal operator that will handle drawing logs in real time.
-# Blender will not be responsive during modules installation but pip logs will be printed immediately.
+# Use factory to create operator that will handle drawing logs in real time.
+# Blender will be responsive during modules installation and pip logs will be printed immediately in new window.
 OT_ModalInstall = install_operator_factory(bl_info['name'])
 
 classes = {
