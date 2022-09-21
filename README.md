@@ -95,15 +95,18 @@ class PREFS_PT_DepAddonExample(bpy.types.AddonPreferences):
     dependencies_show_popup: bpy.props.BoolProperty(default=False, name="Show pop-up notification.")
 ```
 
+###### Update
+Update all or selected modules in non-blocking UI.
+
+![Search for updates](https://github.com/theres1/Dependency-Handler-for-Blender-Addons/blob/main/search.gif?raw=true)
+Search for updates
+![Update](https://github.com/theres1/Dependency-Handler-for-Blender-Addons/blob/main/update.gif?raw=true)
+Update all or selected
+
 ###### Change version
 Change installed version of choosen module in non-blocking UI.
 
 ![Change version](https://github.com/theres1/Dependency-Handler-for-Blender-Addons/blob/main/change.gif?raw=true)
-
-###### Update notification
-Update all or a selected module in non-blocking UI.
-
-![Update](https://github.com/theres1/Dependency-Handler-for-Blender-Addons/blob/main/update.gif?raw=true)
 
 ###### Example addon
 This repository can also function as an addon. Download it as a zip and install in Blender. Code of the example addon is in the &lowbar;&lowbar;file&lowbar;&lowbar;.py of the root dir.
