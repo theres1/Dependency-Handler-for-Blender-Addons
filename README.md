@@ -2,7 +2,9 @@
 ## Automatic module installation via pip, handling exceptions, configurable output printing in Blender addons.
 
 [![Real time logging](https://img.youtube.com/vi/zgJLy2tE1-0/0.jpg)](https://www.youtube.com/watch?v=zgJLy2tE1-0)
+
 ![Dependency GUI](https://github.com/theres1/Dependency-Handler-for-Blender-Addons/blob/main/gui.jpg?raw=true)
+
 Module that allows easy handling of dependencies, created mainly for Blender add-ons.
 
 Usage Examples:
