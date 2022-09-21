@@ -74,4 +74,7 @@ OT_ThreadedInstall = install_operator_factory(bl_info['name'])
 
 # If you want to use dependencies GUI, generate a tuple with operators
 gui_ops = gui_operators_factory(bl_info['name'])
+
+# Check for available updates to installed packages (for GUI) inside the register function.
+check_module_upgrades_thread()
 ```
