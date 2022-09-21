@@ -56,10 +56,15 @@ Use blender_printer.gui_operators_factory() and blender_printer.create_gui() to 
 ```
 class PREFS_PT_DepAddonExample(bpy.types.AddonPreferences):
     bl_idname = __package__
+    
+    # Add these optional properties to the addon preferences, if you want these functionalities turned on.
+    # Check-for-updates-on-start and pop-up notification will be disabled without them.
+    dependencies_check_on_start: bpy.props.BoolProperty(default=False, name="Check for module updates on start")
+    dependencies_show_popup: bpy.props.BoolProperty(default=False, name="Show pop-up notification.")
+    
     def draw(self, context):
         layout = self.layout
         layout.operator(OT_ThreadedInstall.bl_idname)
-        
         blender_printer.create_gui(layout, *gui_ops)
 
 # Create operator that will handle drawing logs in real time.
@@ -69,8 +74,9 @@ OT_ThreadedInstall = install_operator_factory(bl_info['name'])
 # If you want to use dependencies GUI, generate a tuple with operators
 gui_ops = gui_operators_factory(bl_info['name'])
 
-# Check for available updates to installed packages (for GUI) inside the register function.
-check_module_upgrades_thread()
+# Check for available updates to installed packages (for GUI).
+# GUI operators tuple needs to be passed if aformentioned AddonPreferences properties are set
+check_module_upgrades_thread(gui_ops_tuple=gui_ops)
 ```
 '''
 import abc

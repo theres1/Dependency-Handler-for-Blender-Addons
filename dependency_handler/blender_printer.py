@@ -1,4 +1,5 @@
 import queue
+from re import L
 import subprocess
 import sys
 import threading
@@ -101,54 +102,12 @@ def install_operator_factory(bl_info_name: str) -> bpy.types.Operator:
 
 def gui_operators_factory(bl_info_name: str):
     '''Factory for GUI operators. Returns a tuple that can be passed to gui factory.'''
-    idname_change_version = f"dependencies.change_{bpy.path.clean_name(bl_info_name).lower()}"
-    idname_update = f"dependencies.update_{bpy.path.clean_name(bl_info_name).lower()}"
-
-    # I can't get annotations to work in the dynamic version but it looks as generating different class names is not really neccessary
-    class DEPS_OT_InstallModuleVersion(bpy.types.Operator):
-        '''Install different version of module'''
-        bl_idname = idname_change_version
-        bl_label = "Change Module Version"
-        bl_options = {"INTERNAL"}
-
-        module_name: bpy.props.StringProperty(default="", name="Module")
-        
-        versions = ('0.0.0')
-        def _get_versions(self, context):
-            return tuple((v, v, '', i) for i, v in enumerate(DEPS_OT_InstallModuleVersion.versions))
-
-        choosen_version: bpy.props.EnumProperty(items=_get_versions,
-            default=0,
-            name="Version")
-        
-        def draw(self, context):
-            layout = self.layout
-            layout.label(text=self.dep.pip_name)
-            col = layout.column(align=True)
-            col.label(text="Changing package version may result in a cascade")
-            col.label(text="upgrade/downgrade of its dependencies.")
-            layout.prop(self, 'choosen_version')
-        
-        def invoke(self, context, event):
-            self.dep = FROM(self.module_name)
-            DEPS_OT_InstallModuleVersion.versions = self.dep.list_available()
-            wm = context.window_manager
-            return wm.invoke_props_dialog(self)
-
-        def execute(self, context):
-            @threaded
-            def change(pip_name, choosen_version, module):
-                global doing_something, doing_what, updatable_modules
-                doing_what = "Reinstalling module..."
-                doing_something = True
-                proc = subprocess.run([sys.executable, "-m", "pip", "install", "--user", "--force-reinstall", f"{pip_name}=={choosen_version}"], capture_output=True, text=True)
-                print(proc.returncode, proc.stdout, proc.stderr)
-                deepreload.reload(module)
-                updatable_modules = list_module_updates()
-                doing_something = False
-                _refresh_gui()
-            change(self.dep.pip_name, self.choosen_version, self.dep.module)
-            return {'FINISHED'}
+    clean_name = bpy.path.clean_name(bl_info_name).lower()
+    idname_change_version = f"dependencies.change_{clean_name}"
+    idname_update = f"dependencies.update_{clean_name}"
+    idname_find_updates = f"dependencies.find_updates_{clean_name}"
+    idname_list_versions = f"dependencies.list_versions_{clean_name}"
+    idname_update_popup = f"dependencies.update_popup_{clean_name}"
 
     class DEPS_OT_UpdateModule(bpy.types.Operator):
         '''Update module'''
@@ -191,12 +150,118 @@ def gui_operators_factory(bl_info_name: str):
             
             upgrade(self.module_name if self.module_name else "")
             return {'FINISHED'}
+
+    # I can't get annotations to work in the dynamic version but it looks as generating different class names is not really neccessary
+    class DEPS_OT_ChangeModuleVersion(bpy.types.Operator):
+        '''Install different version of module'''
+        bl_idname = idname_change_version
+        bl_label = "Change Module Version"
+        bl_options = {"INTERNAL"}
+
+        module_name: bpy.props.StringProperty(default="", name="Module")
+        
+        def _get_versions(self, context):
+            return tuple((v, v, '', i) for i, v in enumerate(module_versions))
+
+        choosen_version: bpy.props.EnumProperty(items=_get_versions,
+            default=0,
+            name="Version")
+        
+        def draw(self, context):
+            layout = self.layout
+            layout.label(text=self.dep.pip_name)
+            col = layout.column(align=True)
+            col.label(text="Changing package version may result in a cascade")
+            col.label(text="upgrade/downgrade of its dependencies.")
+            layout.prop(self, 'choosen_version')
+        
+        def invoke(self, context, event):
+            if not self.module_name:
+                self.report(type={"ERROR"}, message="Module name cannot be empty.")
+                return {"FINISHED"}
+            self.dep = FROM(self.module_name)
+            wm = context.window_manager
+            return wm.invoke_props_dialog(self)
+
+        def execute(self, context):
+            if not self.module_name:
+                self.report(type={"ERROR"}, message="Module name cannot be empty.")
+                return {"FINISHED"}
+            
+            @threaded
+            def change(pip_name, choosen_version, module):
+                global doing_something, doing_what, updatable_modules
+                doing_what = "Reinstalling module..."
+                doing_something = True
+                proc = subprocess.run([sys.executable, "-m", "pip", "install", "--user", "--force-reinstall", f"{pip_name}=={choosen_version}"], capture_output=True, text=True)
+                print(proc.returncode, proc.stdout, proc.stderr)
+                deepreload.reload(module)
+                updatable_modules = list_module_updates()
+                doing_something = False
+                _refresh_gui()
+            change(self.dep.pip_name, self.choosen_version, self.dep.module)
+            return {'FINISHED'}
     
-    return (DEPS_OT_InstallModuleVersion, DEPS_OT_UpdateModule)
+    class DEPS_OT_ListVersions(bpy.types.Operator):
+        '''List available module versions'''
+        bl_idname = idname_list_versions
+        bl_label = "List Versions"
+        bl_options = {"INTERNAL"}
+
+        module_name: bpy.props.StringProperty(default="", name="Module")
+
+        def execute(self, context):
+            @threaded
+            def do(module_name):
+                global module_versions, doing_something, doing_what
+                doing_something = True
+                doing_what = "Listing available versions... Please wait..."
+                dep = FROM(module_name)
+                module_versions = dep.list_available()
+                doing_something = False
+                _refresh_gui()
+                # run_in_main_thread(lambda: bpy.ops.dependencies.change_dependency_handler_example_addon('INVOKE_DEFAULT', module_name=module_name))
+                run_in_main_thread(lambda: getattr(bpy.ops.dependencies, DEPS_OT_ChangeModuleVersion.bl_idname.split('.')[1])('INVOKE_DEFAULT', module_name=module_name))
+            do(self.module_name)
+            return {'FINISHED'}
+
+    class DEPS_OT_FindUpdates(bpy.types.Operator):
+        '''Check for module updates'''
+        bl_idname = idname_find_updates
+        bl_label = "Check for module updates"
+        bl_options = {"INTERNAL"}
+
+        def execute(self, context):
+            check_module_upgrades_thread(_force_check=True)
+            return {'FINISHED'}
+    
+    class DEPS_OT_UpdatePopup(bpy.types.Operator):
+        '''Check for module updates'''
+        bl_idname = idname_update_popup
+        bl_label = "Dependency Manager"
+        bl_options = {"INTERNAL"}
+
+        def draw(self, context):
+            layout = self.layout
+            col = layout.column(align=True)
+            col.label(text=bl_info_name)
+            col.label(text="Dependencies can be upgraded.")
+            create_gui(layout, DEPS_OT_ChangeModuleVersion, DEPS_OT_UpdateModule, DEPS_OT_FindUpdates, DEPS_OT_ListVersions)
+
+        def invoke(self, context, event):
+            wm = context.window_manager
+            return wm.invoke_props_dialog(self)
+
+        def execute(self, context):
+            return {'FINISHED'}
+    
+    return (DEPS_OT_ChangeModuleVersion, DEPS_OT_UpdateModule, DEPS_OT_FindUpdates, DEPS_OT_ListVersions, DEPS_OT_UpdatePopup)
 
 updatable_modules = {}
 doing_something = False
 doing_what = ""
+module_upgrades_checked = False
+module_versions = ()
 
 execution_queue = queue.Queue()
 
@@ -204,7 +269,7 @@ def _queued_functions_timer():
     while not execution_queue.empty():
         function = execution_queue.get()
         function()
-    return 0.5
+    return 0.25
     
 # This function can safely be called in another thread.
 # The function will be executed when the timer runs the next time.
@@ -224,21 +289,55 @@ def threaded(task: Callable):
 
     return thread_task
 
+def _should_check_on_start(addon_prefs):
+    return hasattr(addon_prefs, 'dependencies_check_on_start') and addon_prefs.dependencies_check_on_start
+
+def _should_show_popup_on_start(addon_prefs):
+    return hasattr(addon_prefs, 'dependencies_show_popup') and addon_prefs.dependencies_show_popup
+
 @threaded
-def check_module_upgrades_thread():
-    '''Fill a list of upgradable modules used in GUI'''
-    global updatable_modules, doing_something, doing_what
+def check_module_upgrades_thread(gui_ops_tuple=None, *, _force_check=False):
+    '''
+    Fill a list of upgradable modules used in GUI.
+    :param update_popup: Draw menu popup if any updates found. Requires gui_ops_tuple to be defined if True.
+    :type: bool
+    :param gui_ops_tuple: a tuple returned by gui_operators_factory()
+    :type: tuple[bpy.types.Operator, bpy.types.Operator, bpy.types.Operator, bpy.types.Operator, bpy.types.Operator]
+    '''
+    addon_prefs = bpy.context.preferences.addons[addon_package].preferences
+    print('force check 1 and 0', not _should_check_on_start(addon_prefs), not _force_check)
+    if not _should_check_on_start(addon_prefs) and not _force_check:
+        return
+    if _should_check_on_start(addon_prefs) and not gui_ops_tuple:
+        raise ValueError("gui_ops_tuple must be defined")
+
+    global updatable_modules, doing_something, doing_what, module_upgrades_checked
+    module_upgrades_checked = True
     doing_what = "Checking for module updates..."
     doing_something = True
     updatable_modules = list_module_updates()
     doing_something = False
     _refresh_gui()
+    if _should_check_on_start(addon_prefs) and _should_show_popup_on_start(addon_prefs):
+        deps = {d.pip_name for d in get_all_dependiencies().values()}
+        installed_modules = set(updatable_modules.keys()) & deps
+        if not installed_modules:
+            return
+        # open pop-up
+        run_in_main_thread(lambda: getattr(bpy.ops.dependencies, gui_ops_tuple[4].bl_idname.split('.')[1])('INVOKE_DEFAULT'))
 
 
 
+addon_package = __package__.split('.')[0]
 
 from . import get_all_dependiencies
-def create_gui(layout: bpy.types.UILayout, module_change_op: bpy.types.Operator, module_update_op: bpy.types.Operator):
+def create_gui(layout: bpy.types.UILayout,
+        module_change_op: bpy.types.Operator,
+        module_update_op: bpy.types.Operator,
+        module_find_updates_op: bpy.types.Operator,
+        module_list_versions_op: bpy.types.Operator,
+        *args
+        ):
     '''GUI generator. Use gui_operators_factory to generate required operators.'''
     layout.separator()
 
@@ -250,6 +349,9 @@ def create_gui(layout: bpy.types.UILayout, module_change_op: bpy.types.Operator,
     
     col = layout.column()
     col.enabled = not doing_something
+
+    if not module_upgrades_checked:
+        col.operator(module_find_updates_op.bl_idname)
 
 
     grid = col.grid_flow(row_major=True, columns=4, align=True, even_columns=True)
@@ -268,9 +370,16 @@ def create_gui(layout: bpy.types.UILayout, module_change_op: bpy.types.Operator,
         subcol = sub.column(align=True)
         subcol.enabled = dep.pip_name in updatable_modules and dep.version != updatable_modules[dep.pip_name][1]
         subcol.operator(module_update_op.bl_idname, text="Update").module_name = dep.name
-        sub.operator(module_change_op.bl_idname, text="", icon="THREE_DOTS").module_name = dep.name
+        sub.operator(module_list_versions_op.bl_idname, text="", icon="THREE_DOTS").module_name = dep.name
 
     box.operator(module_update_op.bl_idname, text="Update All").module_name = ""
+
+    addon_prefs = bpy.context.preferences.addons[addon_package].preferences
+    col = layout.column(align=True)
+    if hasattr(addon_prefs, 'dependencies_check_on_start'):
+        col.prop(addon_prefs, 'dependencies_check_on_start')
+    if hasattr(addon_prefs, 'dependencies_show_popup'):
+        col.prop(addon_prefs, 'dependencies_show_popup')
 
 def _refresh_gui():
     def do():

@@ -55,6 +55,12 @@ class OBJECT_PT_DepAddonExample(bpy.types.Panel):
 
 class PREFS_PT_DepAddonExample(bpy.types.AddonPreferences):
     bl_idname = __package__
+    
+    # Add these optional properties to the addon preferences, if you want these functionalities turned on.
+    # Check-for-updates-on-start and pop-up notification will be disabled without them.
+    dependencies_check_on_start: bpy.props.BoolProperty(default=False, name="Check for module updates on start")
+    dependencies_show_popup: bpy.props.BoolProperty(default=False, name="Show pop-up notification.")
+    
     def draw(self, context):
         layout = self.layout
         layout.operator(OT_ThreadedInstall.bl_idname)
@@ -72,6 +78,7 @@ gui_ops = gui_operators_factory(bl_info['name'])
 classes = (
     OT_ThreadedInstall,
     OBJECT_PT_DepAddonExample,
+    PREFS_PT_DepAddonExample,
  ) + gui_ops
 
 def register():
@@ -79,7 +86,8 @@ def register():
         bpy.utils.register_class(cls)
     
     # Check for available updates to installed packages (for GUI).
-    check_module_upgrades_thread()
+    # GUI operators tuple needs to be passed if aformentioned AddonPreferences properties are set
+    check_module_upgrades_thread(gui_ops_tuple=gui_ops)
 
 def unregister():
     for cls in classes:

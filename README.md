@@ -15,7 +15,7 @@ Import output printing front-ends:
     from . dependency_handler import FilePrinter
 ```
 BlenderPrinter - creates a new Blender window with Text Editor and writes logs into text file.
-FilePrinter - writes logs into text file. By default, text file is created next to __file__.
+FilePrinter - writes logs into text file. By default, text file is created next to &lowbar;&lowbar;file&lowbar;&lowbar;.
 ```
     from . import dependency_handler
     from . dependency_handler import FROM, IMPORT
@@ -62,10 +62,15 @@ Use blender_printer.gui_operators_factory() and blender_printer.create_gui() to 
 ```
 class PREFS_PT_DepAddonExample(bpy.types.AddonPreferences):
     bl_idname = __package__
+    
+    # Add these optional properties to the addon preferences, if you want these functionalities turned on.
+    # Check-for-updates-on-start and pop-up notification will be disabled without them.
+    dependencies_check_on_start: bpy.props.BoolProperty(default=False, name="Check for module updates on start")
+    dependencies_show_popup: bpy.props.BoolProperty(default=False, name="Show pop-up notification.")
+    
     def draw(self, context):
         layout = self.layout
         layout.operator(OT_ThreadedInstall.bl_idname)
-        
         blender_printer.create_gui(layout, *gui_ops)
 
 # Create operator that will handle drawing logs in real time.
@@ -75,6 +80,34 @@ OT_ThreadedInstall = install_operator_factory(bl_info['name'])
 # If you want to use dependencies GUI, generate a tuple with operators
 gui_ops = gui_operators_factory(bl_info['name'])
 
-# Check for available updates to installed packages (for GUI) inside the register function.
-check_module_upgrades_thread()
+# Check for available updates to installed packages (for GUI).
+# GUI operators tuple needs to be passed if aformentioned AddonPreferences properties are set
+check_module_upgrades_thread(gui_ops_tuple=gui_ops)
 ```
+
+###### Update notification
+![Update notification](https://github.com/theres1/Dependency-Handler-for-Blender-Addons/blob/main/popup.gif?raw=true)
+
+Add __dependencies_check_on_start__ and __dependencies_show_popup__ properties to the addon preferences to enable auto-update-check and update notification pop-up on start. Two switches to control these will also become available in the generated GUI.
+```
+class PREFS_PT_DepAddonExample(bpy.types.AddonPreferences):
+    dependencies_check_on_start: bpy.props.BoolProperty(default=False, name="Check for module updates on start")
+    dependencies_show_popup: bpy.props.BoolProperty(default=False, name="Show pop-up notification.")
+```
+
+###### Change version
+Change installed version of choosen module in non-blocking UI.
+
+![Change version](https://github.com/theres1/Dependency-Handler-for-Blender-Addons/blob/main/change.gif?raw=true)
+
+###### Update notification
+Update all or a selected module in non-blocking UI.
+
+![Update](https://github.com/theres1/Dependency-Handler-for-Blender-Addons/blob/main/update.gif?raw=true)
+
+###### Example addon
+This repository can also function as an addon. Download it as a zip and install in Blender. Code of the example addon is in the &lowbar;&lowbar;file&lowbar;&lowbar;.py of the root dir.
+
+==============================
+
+Gifs on this page were edited and rendered in Blender using [Styriam ICC Image Compressor](https://www.styriam.com/products/icc_image_compressor.php) addon.
