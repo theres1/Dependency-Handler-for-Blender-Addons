@@ -84,6 +84,9 @@ gui_ops = gui_operators_factory(bl_info['name'])
 # GUI operators tuple needs to be passed if aformentioned AddonPreferences properties are set
 check_module_upgrades_thread(gui_ops_tuple=gui_ops)
 ```
+###### Real time log
+Pass BlenderPrinter object to init enable real time logging in new window.
+![Logging](https://github.com/theres1/Dependency-Handler-for-Blender-Addons/blob/main/log.gif?raw=true)
 
 ###### Update notification
 ![Update notification](https://github.com/theres1/Dependency-Handler-for-Blender-Addons/blob/main/popup.gif?raw=true)
