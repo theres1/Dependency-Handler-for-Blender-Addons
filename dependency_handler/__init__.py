@@ -50,23 +50,24 @@ Missing modules can be installed in a time of your choosing like this:
 install_all()/install_all_generator() function starts generating logs that will be presented in chosen front-ends.
 
 #### Blender specific usage
-Use blender_printer.install_operator_factory factory to create an operator that will handle drawing logs in real time.
+Use blender_printer.install_operator_factory() to create an operator that will handle drawing logs in real time.
 Blender will be responsive during modules installation and pip logs will be printed immediately in new window.
+Use blender_printer.gui_operators_factory() and blender_printer.create_gui() to generate GUI.
 ```
-OT_ThreadedInstall = dependency_handler.blender_printer.install_operator_factory(bl_info['name'])
-
-class OBJECT_PT_DepAddonExample(bpy.types.Panel):
-    bl_label = "Dependency Addon Example"
-    bl_space_type = "PROPERTIES"   
-    bl_region_type = "WINDOW"
-    bl_context = "object"
-
+class PREFS_PT_DepAddonExample(bpy.types.AddonPreferences):
+    bl_idname = __package__
     def draw(self, context):
         layout = self.layout
-        if dp.DEPENDENCIES_IMPORTED:
-            layout.label(text="All imported")
-        else:
-            layout.operator(OT_ThreadedInstall.bl_idname)
+        layout.operator(OT_ThreadedInstall.bl_idname)
+        
+        blender_printer.create_gui(layout, *gui_ops)
+
+# Create operator that will handle drawing logs in real time.
+# Blender will be responsive during modules installation and pip logs will be printed immediately in new window.
+OT_ThreadedInstall = install_operator_factory(bl_info['name'])
+
+# If you want to use dependencies GUI, generate a tuple with operators
+gui_ops = gui_operators_factory(bl_info['name'])
 ```
 '''
 import abc
@@ -75,8 +76,11 @@ import importlib
 from pathlib import Path
 import subprocess
 import sys
-import io
+from types import ModuleType
 from typing import Generator
+
+import sys, site
+sys.path.append(site.getusersitepackages())
 
 pybin = sys.executable
 DEPENDENCIES_IMPORTED = False
@@ -144,6 +148,7 @@ class Dependency:
     imported: bool = field(default=False, init=False)
     installed: bool = field(default=False, init=False)
     submodules: list[str] = field(default_factory=list, init=False)
+    module: ModuleType = field(default=None, init=False)
 
     def __post_init__(self):
         all_dependencies[self.name] = self
@@ -154,6 +159,7 @@ class Dependency:
             module = importlib.import_module(self.name)
             self.imported = self.installed = True
             self._add_to_globals(module)
+            self.module = module
         except ModuleNotFoundError as e:
             pass
     
@@ -195,6 +201,17 @@ class Dependency:
             self._add_to_globals(other_globals[self.name])
             return True
         return False
+    
+    def list_available(self) -> tuple[str]:
+        '''Tuple of all versions available on Pip. Newest first.'''
+        # Send wrong version name of the package to induce an error that results in returning all version names
+        proc = subprocess.run([pybin, "-m", "pip", "install", f"{self.pip_name}=="], capture_output=True, text=True)
+        import re
+        return tuple(reversed(re.findall(r'(\d+(?:\.?\w*)*)', proc.stderr)))
+    
+    @property
+    def version(self):
+        return self.module.__version__ if self.module else ""
 
 other_globals = None
 all_dependencies: dict[str, Dependency] = {}
@@ -256,7 +273,7 @@ class PrinterInterface(metaclass=abc.ABCMeta):
         Use it when implementing concrete methods.
         '''
         def wrap(f):
-            def wrapper(*args):
+            def wrapper(*args, **kwargs):
                 try:
                     f(*args)
                 except Exception as e:
@@ -411,16 +428,41 @@ def check_all_loaded() -> bool:
     DEPENDENCIES_IMPORTED = all(dep.imported for dep in all_dependencies.values())
     return DEPENDENCIES_IMPORTED
 
+def list_module_updates() -> dict[str, tuple[str, str]]:
+    '''
+    Returns a tuple with updatable modules
+    
+    :return: A dict of tuples dict[pip_module_name, (current_ver, recent_ver)]
+    :rtype: dict[str, tuple[str, str]]
+    '''
+    updatable = {}
+    try:
+        proc = subprocess.run([pybin, "-m", "pip", "list", "--outdated"], capture_output=True, check=True, text=True)
+        # modules = ()
+        for line in proc.stdout.splitlines()[2:]:
+            line = line.split()[:-1]
+            updatable[line[0]] = tuple(line[1:])
+        return updatable
+    except subprocess.CalledProcessError as e:
+        print(e, e.stderr)
+        return updatable
+
+def get_all_dependiencies():
+    return all_dependencies
+
 if __name__ == "__main__":
     # deps_installed = init([('PIL', 'Pillow'), 'pyexiv2'], globals=globals())
     # _log('checked and installed:', deps_installed)
     # _log('all deps installed:', install_all())
     # _log('is restart needed:', is_restart_needed())
     
-    deps_installed = init(['pyexiv2'], module_globals=globals(), printers=[FilePrinter(),])
-    FROM(('PIL', 'Pillow')).IMPORT('Image', 'ImageCms')
-    IMPORT('Non-Existing-Module')
+    # deps_installed = init(['pyexiv2'], module_globals=globals(), printers=[FilePrinter(),])
+    # FROM(('PIL', 'Pillow')).IMPORT('Image', 'ImageCms')
+    # IMPORT('Non-Existing-Module')
     # print('check all:', check_all_loaded())
-    print('install_all generator:', [_ for _ in install_all_generator()])
+    # print('install_all generator:', [_ for _ in install_all_generator()])
     # print('### install_all:', install_all())
     # print(ImageCms)
+
+    print(list_module_updates())
+    # print(FROM(('PIL', "Pillow")).list_available())

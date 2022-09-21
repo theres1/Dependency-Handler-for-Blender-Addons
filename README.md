@@ -2,7 +2,7 @@
 ## Automatic module installation via pip, handling exceptions, configurable output printing in Blender addons.
 
 [![Real time logging](https://img.youtube.com/vi/zgJLy2tE1-0/0.jpg)](https://www.youtube.com/watch?v=zgJLy2tE1-0)
-
+![Dependency GUI](https://github.com/theres1/Dependency-Handler-for-Blender-Addons/blob/main/gui.jpg?raw=true)
 Module that allows easy handling of dependencies, created mainly for Blender add-ons.
 
 Usage Examples:
@@ -54,21 +54,22 @@ Missing modules can be installed in a time of your choosing like this:
 install_all()/install_all_generator() function starts generating logs that will be presented in chosen front-ends.
 
 #### Blender specific usage
-Use blender_printer.install_operator_factory factory to create an operator that will handle drawing logs in real time.
+Use blender_printer.install_operator_factory() to create an operator that will handle drawing logs in real time.
 Blender will be responsive during modules installation and pip logs will be printed immediately in new window.
+Use blender_printer.gui_operators_factory() and blender_printer.create_gui() to generate GUI.
 ```
-OT_ThreadedInstall = dependency_handler.blender_printer.install_operator_factory(bl_info['name'])
-
-class OBJECT_PT_DepAddonExample(bpy.types.Panel):
-    bl_label = "Dependency Addon Example"
-    bl_space_type = "PROPERTIES"   
-    bl_region_type = "WINDOW"
-    bl_context = "object"
-
+class PREFS_PT_DepAddonExample(bpy.types.AddonPreferences):
+    bl_idname = __package__
     def draw(self, context):
         layout = self.layout
-        if dp.DEPENDENCIES_IMPORTED:
-            layout.label(text="All imported")
-        else:
-            layout.operator(OT_ThreadedInstall.bl_idname)
+        layout.operator(OT_ThreadedInstall.bl_idname)
+        
+        blender_printer.create_gui(layout, *gui_ops)
+
+# Create operator that will handle drawing logs in real time.
+# Blender will be responsive during modules installation and pip logs will be printed immediately in new window.
+OT_ThreadedInstall = install_operator_factory(bl_info['name'])
+
+# If you want to use dependencies GUI, generate a tuple with operators
+gui_ops = gui_operators_factory(bl_info['name'])
 ```
