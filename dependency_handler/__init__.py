@@ -17,10 +17,11 @@ FilePrinter - writes logs into text file. By default, text file is created next 
 Initialise dependencies. Already installed modules will be imported during initialisation.
 ```
     dependency_handler.init([('PIL', 'Pillow'), 'AnyModule'], module_globals=globals(), printers=[BlenderPrinter("Dependency Log of My Addon"), FilePrinter()])
-    FROM('PIL').IMPORT('ImageCms', 'Image') # or FROM(('PIL', 'Pillow')).IMPORT('ImageCms', 'Image')
+    FROM(('PIL', 'Pillow', ("9.2.0",))).IMPORT('Image', 'ImageCms')
     IMPORT('AnyModule2')
+    IMPORT(('AnyModule3', ("1.0.1", "1.5.0")))
 ```
-Dependencies can be initialised by init, FROM and IMPORT functions. Use tuple (module_name, pip_name) for modules that need different names for pip installing and importing.
+Dependencies can be initialised by init, FROM and IMPORT functions. Use tuple (module_name [ , pip_name ] [ , (min_version, max_version) ] ) for modules that need different names for pip installing and importing.
 Pass globals() as a module_globals parameter to import modules into global namespace.
 State of all dependencies can be tracked by dependency_handler.check_all_loaded() function returning True if all dependencies are imported.
 ```    
@@ -103,6 +104,12 @@ class ModuleFatalException(DepndencyHandlerException): pass
 class SubModuleNotFound(DepndencyHandlerException): pass
 
 pip_ensured = False
+_restart_needed = False
+def restart_needed(need=None, /):
+    global _restart_needed
+    if need is None:
+        return _restart_needed
+    _restart_needed = need
 
 def _ensure_pip():
     global pip_ensured
@@ -154,10 +161,12 @@ class Dependency:
     '''A class representing a Dependency. For internal use mainly.'''
     name: str
     pip_name: str = None
+    version_range: tuple[str | None, str | None] = (None, None) #field(default_factory=lambda :tuple(None, None))
     imported: bool = field(default=False, init=False)
     installed: bool = field(default=False, init=False)
     submodules: list[str] = field(default_factory=list, init=False)
     module: ModuleType = field(default=None, init=False)
+    wrong_version: bool = field(default=False, init=False)
 
     def __post_init__(self):
         all_dependencies[self.name] = self
@@ -166,9 +175,13 @@ class Dependency:
 
         try:
             module = importlib.import_module(self.name)
+            self.module = module
+            if (self.version_range[0] and module.__version__ < self.version_range[0]) \
+                or (self.version_range[1] and module.__version__ > self.version_range[1]):
+                self.wrong_version = True
+                return
             self.imported = self.installed = True
             self._add_to_globals(module)
-            self.module = module
         except ModuleNotFoundError as e:
             pass
     
@@ -186,21 +199,39 @@ class Dependency:
         if self.imported:
             return True
         yield from _ensure_pip()
-        _log("\n----- Installing ", self.pip_name, "-----")
+        _log("\n----- Installing ", self.pip_name, self.version_range if self.version_range else "", "-----")
+        package_name = self.pip_name
+        match self.version_range:
+            case (str(), None):
+                package_name += f'>={self.version_range[0]}'
+            case (None, str()):
+                package_name += f'<={self.version_range[1]}'
+            case (str(), str()):
+                package_name += f'>={self.version_range[0]},<={self.version_range[1]}'
+
         try:
-            yield from _execute([pybin, "-m", "pip", "install", "--upgrade", "--user", self.pip_name])
-            self.installed = True
-            try:
-                module = importlib.import_module(self.name)
-                self.imported = True
-                self._add_to_globals(module)
-                _log("Done.")
-                return True
-            except ModuleNotFoundError:
-                estr = f'{self.pip_name} installation finished but {self.name} import failed. Try restarting Blender.'
-                _log(estr)
+            yield from _execute([pybin, "-m", "pip", "install", "--upgrade", "--upgrade-strategy", "only-if-needed", "--user", package_name])
         except subprocess.CalledProcessError as e:
-            _log(f'{self.pip_name} module installation failed.')
+            if self.wrong_version:
+                _log(f'{self.pip_name} module installation possibly failed or the temporary files could not be deleted after reinstalling the package. If this is the case, temp files can be deleted manually after closing Blender. Trying to import...')
+            else:
+                _log(f'{self.pip_name} module installation failed.')
+                return False
+        try:
+            self.module = importlib.import_module(self.name)
+            if self.wrong_version:
+                # import deepreload
+                # deepreload.reload(self.module)
+                restart_needed(True)
+                _log("\n", "Module needs to be reloaded. Please restart Blender.")
+            self.installed = self.imported =True
+            self.wrong_version = False
+            self._add_to_globals(self.module)
+            _log("Done.")
+            return True
+        except ModuleNotFoundError:
+            estr = f'{self.pip_name} installation finished but {self.name} import failed. Try restarting Blender.'
+            _log(estr)
         
         return False
     
@@ -236,24 +267,45 @@ def get_failed_modules() -> list[Dependency]:
 def get_installed_version():
     pass
 
-def FROM(module_name: str | tuple[str, str], /) -> Dependency:
-    '''Takes a module that can be a string or a tuple of strings (package_name, pip_name). Returns a Dependency (not a module).'''
+def FROM(module_name: str | tuple[str, str] | tuple[str, tuple[str, str]] | tuple[str, str, tuple[str, str]], /) -> Dependency:
+    '''
+    Takes a module that can be a string or a tuple. Returns a Dependency (not a module).
+    :param module_name: string representing module name or a tuple of strings (package_name [, pip_name ] [, (min_version, max_version) ]). min_version, max_version can be None
+    :type: str | tuple[str, str] | tuple[str, tuple[str, str]] | tuple[str, str, tuple[str, str]]
+
+    :return: Dependency object
+    :rtype: Dependency
+    '''
+    version_range = (None, None)
+    print(module_name)
     match module_name:
+        case (str(), str(), (*vrange,)):
+            name, pip_name, version_range = module_name
+        case (str(), (*vrange,)):
+            name, version_range = module_name
+            pip_name = name
         case (str(), str()):
             name, pip_name = module_name
         case str():
             name = pip_name = module_name
         case _:
-            raise Exception("Wrong argument type")
+            raise ValueError("Wrong argument type")
     
     if name in all_dependencies:
         m = all_dependencies[name]
     else:
-        m = Dependency(name, pip_name)
+        m = Dependency(name, pip_name, version_range)
     return m
 
-def IMPORT(module_name: str | tuple[str, str], /) -> Dependency:
-    '''Takes a module that can be a string or a tuple of strings (package_name, pip_name). Returns True if module is successfully loaded.'''
+def IMPORT(module_name: str | tuple[str, str] | tuple[str, tuple[str, str]] | tuple[str, str, tuple[str, str]], /) -> Dependency:
+    '''
+    Takes a module that can be a string or a tuple. Returns True if module gets imported, False otherwise.
+    :param module_name: string representing module name or a tuple of strings (package_name [, pip_name ] [, (min_version, max_version) ]). min_version, max_version can be None
+    :type: str | tuple[str, str] | tuple[str, tuple[str, str]] | tuple[str, str, tuple[str, str]]
+
+    :return: Dependency object
+    :rtype: Dependency
+    '''
     return FROM(module_name).imported
 
 
@@ -267,7 +319,7 @@ class PrinterInterface(metaclass=abc.ABCMeta):
         raise NotImplementedError
     
     @abc.abstractmethod
-    def prepare(self) -> None:
+    def prepare(self, clear: bool=True) -> None:
         """Clears buffer. Prepares to receive data."""
         raise NotImplementedError
     
@@ -301,7 +353,7 @@ class ConsolePrinter(PrinterInterface):
         print(msg)
     
     @PrinterInterface.catch_exceptions(use_fallback_log=True)
-    def prepare(self):
+    def prepare(self, clear: bool=True):
         # Do nothing
         return
 
@@ -335,7 +387,7 @@ class FilePrinter(PrinterInterface):
 
 all_printers: list[PrinterInterface] = []
 
-def init(dependencies: list[str | tuple[str, str]]=None, /, *, module_globals: dict=None, printers: list[PrinterInterface]=None, use_console: bool=True) -> bool:
+def init(dependencies: list[str | tuple[str, str] | tuple[str, str, tuple[str, str]]]=None, /, *, module_globals: dict=None, printers: list[PrinterInterface]=None, use_console: bool=True) -> bool:
     '''
     Takes in a list of dependencies and a module globals() dict. A dependency can be a string or a tuple of strings (package name, pip name).
     Returns True if all dependencies are installed.
@@ -361,7 +413,8 @@ def init(dependencies: list[str | tuple[str, str]]=None, /, *, module_globals: d
     other_globals = module_globals
     if not dependencies:
         dependencies = []
-    if not all({Dependency(*name if isinstance(name, tuple) else (name,)).imported for name in dependencies}):
+    # if not all({Dependency(*name if isinstance(name, tuple) else (name,)).imported for name in dependencies}):
+    if not all({FROM(name).imported for name in dependencies}):
         return False
     return True
     
@@ -391,6 +444,8 @@ def install_all_generator():
         
         if check_all_loaded():
             _log("\n\n---------- Installation Successful ----------")
+            if restart_needed():
+                _log("\n", "Modules need to be reloaded. Please restart Blender.")
             return True
     except SubModuleNotFound as e:
         raise

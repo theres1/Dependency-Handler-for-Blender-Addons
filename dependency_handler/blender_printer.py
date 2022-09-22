@@ -1,18 +1,18 @@
 import queue
-from re import L
+import site
 import subprocess
 import sys
 import threading
 from typing import Callable
 import bpy
 from . import PrinterInterface, install_all_generator, list_module_updates, FROM
-from . import deepreload
+from . import restart_needed
+# from . import deepreload
 
 class BlenderPrinter(PrinterInterface):
     '''
     A class representing Blender front-end. Creates a new Blender window with Text Editor ready to receive logs.
     Before printing, task queue have to be registered with register_timer(). finish() method invokes unregister_timer()
-
     register_timer() is not invoked in prepare() because the latter is supposed to be run in new thread.
     '''
     area = None
@@ -22,15 +22,19 @@ class BlenderPrinter(PrinterInterface):
 
     @staticmethod
     def register_timer():
-        bpy.app.timers.register(_queued_functions_timer)
+        if not bpy.app.timers.is_registered(_queued_functions_timer):
+            bpy.app.timers.register(_queued_functions_timer)
 
     @staticmethod
     def unregister_timer():
-        bpy.app.timers.unregister(_queued_functions_timer)
+        def do():
+            if bpy.app.timers.is_registered(_queued_functions_timer):
+                bpy.app.timers.unregister(_queued_functions_timer)
+        run_in_main_thread(do)
     
     @PrinterInterface.catch_exceptions(use_fallback_log=True)
     def log(self, *msg: list):
-        msg = '\n' + " ".join(map(str, map(str, msg))).rstrip()
+        msg = '\n' + " ".join(map(str, msg)).rstrip()
         def do():
             if not (self.area and len(self.area.spaces) and self.area.type=='TEXT_EDITOR'):
                 self.area = self._create_text_window()
@@ -41,16 +45,21 @@ class BlenderPrinter(PrinterInterface):
         run_in_main_thread(do)
     
     @PrinterInterface.catch_exceptions(use_fallback_log=True)
-    def prepare(self):
+    def prepare(self, clear=True):
+        BlenderPrinter.register_timer()
+        print('1', clear)
+        clear_ = clear
         def do():
             text = self._get_text()
-            text.clear()
+            print('2', clear, clear_)
+            if clear_:
+                text.clear()
         run_in_main_thread(do)
 
     @PrinterInterface.catch_exceptions(use_fallback_log=True)
     def finish(self):
         self.log("\nPlease restart Blender and try again or save and show this log to the developer.")
-        run_in_main_thread(lambda: BlenderPrinter.unregister_timer())
+        BlenderPrinter.unregister_timer()
 
     def _get_text(self) -> bpy.types.Text:
         if self.logname in bpy.data.texts:
@@ -70,6 +79,12 @@ class BlenderPrinter(PrinterInterface):
         area.spaces[0].show_region_footer = False
         area.spaces[0].show_word_wrap=True
         return area
+
+def fast_log(*msg):
+    '''Quick logging to new window from thread (BlenderPrinter.log puts into queue)'''
+    from . import all_printers
+    for printer in all_printers:
+        printer.log(*msg)
 
 def install_operator_factory(bl_info_name: str) -> bpy.types.Operator:
     '''Factory for operator that installs dependencies and prints logs into new window in real-time.'''
@@ -100,6 +115,20 @@ def install_operator_factory(bl_info_name: str) -> bpy.types.Operator:
         "poll": poll,
     })
 
+def _parse_out(proc: subprocess.CompletedProcess):
+    last_line = ""
+    if proc.stdout:
+        last_line = proc.stdout.splitlines()[-1]
+    if any(string in last_line for string in ("Successfully", "Requirement already satisfied")):
+        fast_log(proc.stdout)
+        fast_log("\n", "Some temporary directories might have been left undeleted. You can remove them after closing Blender.")
+        fast_log("All folders whose names start with ~ (tilde) can be safely removed from:")
+        fast_log(site.getusersitepackages())
+    else:
+        fast_log("\n", proc.args)
+        fast_log("\n", proc.stdout)
+        fast_log("\n", proc.stderr)
+
 def gui_operators_factory(bl_info_name: str):
     '''Factory for GUI operators. Returns a tuple that can be passed to gui factory.'''
     clean_name = bpy.path.clean_name(bl_info_name).lower()
@@ -125,25 +154,48 @@ def gui_operators_factory(bl_info_name: str):
                 if module_name:
                     dependency = FROM(module_name)
                     doing_what = "Updating module... Please wait..."
-                    proc = subprocess.run([sys.executable, "-m", "pip", "install", "--user", "--upgrade", "--upgrade-strategy", "only-if-needed", f"{dependency.pip_name}"], capture_output=True, text=True)
-                    print(proc.returncode, proc.stdout, proc.stderr)
-                    doing_what = "Reloading module... Please wait..."
-                    deepreload.reload(dependency.module)
-                    doing_what = "Checking for module updates..."
-                    updatable_modules = list_module_updates()
+                    package_name = dependency.pip_name
+                    match self.version_range:
+                        case (str(), None):
+                            package_name += f'>={dependency.version_range[0]}'
+                        case (None, str()):
+                            package_name += f'<={dependency.version_range[1]}'
+                        case (str(), str()):
+                            package_name += f'>={dependency.version_range[0]},<={dependency.version_range[1]}'
+                    proc = subprocess.run([sys.executable, "-m", "pip", "install", "--user", "--upgrade", "--upgrade-strategy", "only-if-needed", f"{package_name}"], capture_output=True, text=True)
+                    _parse_out(proc)
+                    restart_needed(True)
+                    fast_log("\n", "Modules need to be reloaded. Please restart Blender.")
+                    # Reloading does not work with some packages. Removed for now.
+                    # doing_what = "Reloading module... Please wait..."
+                    # try:
+                    #     deepreload.reload(dependency.module)
+                    #     doing_what = "Checking for module updates..."
+                    #     updatable_modules = list_module_updates()
+                    # except:
+                    #     fast_log("\n", "Reloading modules failed. Please restart Blender.")
                 else:
+                    # Does not really work. pip temp dirs of upgraded modules cannot be deleted because they are still in use by Blender.
+                    # This interrupts the installation of modules in the middle of the list.
+                    # For now I removed Update All from the GUI
                     doing_what = "Updating all modules... Please wait..."
                     deps = {d.pip_name for d in get_all_dependiencies().values()}
                     installed_modules = set(updatable_modules.keys()) & deps
                     if installed_modules:
                         proc = subprocess.run([sys.executable, "-m", "pip", "install", "--user", "--upgrade", "--upgrade-strategy", "only-if-needed"] + list(installed_modules), capture_output=True, text=True)
-                        print(proc.returncode, proc.stdout, proc.stderr)
-                        doing_what = "Reloading updated modules... Please wait..."
-                        for dep in get_all_dependiencies().values():
-                            if dep.imported:
-                                deepreload.reload(dep.module)
-                        doing_what = "Checking for module updates..."
-                        updatable_modules = list_module_updates()
+                        _parse_out(proc)
+                        restart_needed(True)
+                        fast_log("\n", "Modules need to be reloaded. Please restart Blender.")
+
+                        # doing_what = "Reloading updated modules... Please wait..."
+                        # for dep in get_all_dependiencies().values():
+                        #     if dep.imported:
+                        #         try:
+                        #             deepreload.reload(dep.module)
+                        #         except:
+                        #             fast_log("\n", "Reloading modules failed. Please restart Blender.")
+                        # doing_what = "Checking for module updates..."
+                        # updatable_modules = list_module_updates()
 
                 doing_something = False
                 _refresh_gui()
@@ -193,10 +245,17 @@ def gui_operators_factory(bl_info_name: str):
                 global doing_something, doing_what, updatable_modules
                 doing_what = "Reinstalling module..."
                 doing_something = True
-                proc = subprocess.run([sys.executable, "-m", "pip", "install", "--user", "--force-reinstall", f"{pip_name}=={choosen_version}"], capture_output=True, text=True)
-                print(proc.returncode, proc.stdout, proc.stderr)
-                deepreload.reload(module)
-                updatable_modules = list_module_updates()
+                proc = subprocess.run([sys.executable, "-m", "pip", "install", "--user", f"{pip_name}=={choosen_version}"], capture_output=True, text=True)
+                _parse_out(proc)
+                restart_needed(True)
+                fast_log("\n", "Modules need to be reloaded. Please restart Blender.")
+
+                # try:
+                #     deepreload.reload(module)
+                # except:
+                #     fast_log("\n", "Reloading modules failed. Please restart Blender.")
+                # updatable_modules = list_module_updates()
+
                 doing_something = False
                 _refresh_gui()
             change(self.dep.pip_name, self.choosen_version, self.dep.module)
@@ -299,13 +358,10 @@ def _should_show_popup_on_start(addon_prefs):
 def check_module_upgrades_thread(gui_ops_tuple=None, *, _force_check=False):
     '''
     Fill a list of upgradable modules used in GUI.
-    :param update_popup: Draw menu popup if any updates found. Requires gui_ops_tuple to be defined if True.
-    :type: bool
     :param gui_ops_tuple: a tuple returned by gui_operators_factory()
     :type: tuple[bpy.types.Operator, bpy.types.Operator, bpy.types.Operator, bpy.types.Operator, bpy.types.Operator]
     '''
     addon_prefs = bpy.context.preferences.addons[addon_package].preferences
-    print('force check 1 and 0', not _should_check_on_start(addon_prefs), not _force_check)
     if not _should_check_on_start(addon_prefs) and not _force_check:
         return
     if _should_check_on_start(addon_prefs) and not gui_ops_tuple:
@@ -350,29 +406,47 @@ def create_gui(layout: bpy.types.UILayout,
     col = layout.column()
     col.enabled = not doing_something
 
-    if not module_upgrades_checked:
-        col.operator(module_find_updates_op.bl_idname)
+    if restart_needed():
+        box = col.box()
+        box.label(text="Modules need to be reloaded. Please restart Blender.")
+    else:
+        if not module_upgrades_checked:
+            col.operator(module_find_updates_op.bl_idname)
+        
+        grid = col.grid_flow(row_major=True, columns=4, align=True, even_columns=True)
+        box_wrap(grid).label(text="Package")
+        box_wrap(grid).label(text="Current")
+        box_wrap(grid).label(text="Latest")
+        box_wrap(grid).label(text="")
+        box = col.box()
+        grid = box.grid_flow(row_major=True, columns=4, align=True, even_columns=True)
+        for dep in get_all_dependiencies().values():
+            grid.label(text=dep.name)
+            vmin, vmax = dep.version_range
+            if vmin or vmax:
+                vmin = vmin if vmin else ""
+                vmax = vmax if vmax else ""
+                version_range_str = f"<{vmin}, {vmax}>"
+                grid.label(text=f"{dep.version} {version_range_str}") # current (wrong version)
+            else:
+                grid.label(text=dep.version) # current
+            
+            upd_cur, upd_lat = updatable_modules[dep.pip_name] if dep.pip_name in updatable_modules else ("","")
+            grid.label(text=upd_lat if dep.pip_name in updatable_modules else "") # latest
+            sub = grid.row(align=True)
+            sub.enabled = dep.module is not None
+            subcol = sub.column(align=True)
+            subcol.enabled = dep.pip_name in updatable_modules and dep.version != upd_lat
+            if dep.module is not None:
+                if vmin:
+                    subcol.enabled &= upd_lat >= vmin if vmin else True
+                if vmax:
+                    subcol.enabled &= upd_lat <= vmax if vmax else True
+            subcol.operator(module_update_op.bl_idname, text="Update").module_name = dep.name
+            sub.operator(module_list_versions_op.bl_idname, text="", icon="THREE_DOTS").module_name = dep.name
 
-
-    grid = col.grid_flow(row_major=True, columns=4, align=True, even_columns=True)
-    box_wrap(grid).label(text="Package")
-    box_wrap(grid).label(text="Current")
-    box_wrap(grid).label(text="Latest")
-    box_wrap(grid).label(text="")
-    box = col.box()
-    grid = box.grid_flow(row_major=True, columns=4, align=True, even_columns=True)
-    for dep in get_all_dependiencies().values():
-        grid.label(text=dep.name)
-        grid.label(text=dep.version) # current
-        grid.label(text=updatable_modules[dep.pip_name][1] if dep.pip_name in updatable_modules else "") # latest
-        sub = grid.row(align=True)
-        sub.enabled = dep.imported
-        subcol = sub.column(align=True)
-        subcol.enabled = dep.pip_name in updatable_modules and dep.version != updatable_modules[dep.pip_name][1]
-        subcol.operator(module_update_op.bl_idname, text="Update").module_name = dep.name
-        sub.operator(module_list_versions_op.bl_idname, text="", icon="THREE_DOTS").module_name = dep.name
-
-    box.operator(module_update_op.bl_idname, text="Update All").module_name = ""
+        # if module_upgrades_checked:
+        #     box.operator(module_update_op.bl_idname, text="Update All").module_name = ""
 
     addon_prefs = bpy.context.preferences.addons[addon_package].preferences
     col = layout.column(align=True)

@@ -21,16 +21,14 @@ dp.init(
     module_globals=globals(),
     printers=[BlenderPrinter(f"Dependency Log of {bl_info['name']}"),
     ])
-FROM('Non_Existing_Module3').IMPORT('Sub1', 'Sub2')
-IMPORT('Non_Existing_Module4')
-FROM(('PIL', 'Pillow')).IMPORT('Image', 'ImageCms')
+IMPORT(('Non_Existing_Module4', ("1.5.0", None)))
+FROM(('PIL', 'Pillow', ("9.2.0",))).IMPORT('Image', 'ImageCms')
 
 dp.check_all_loaded()
 
 # Import once again to make these modules visible to code completion
 if dp.DEPENDENCIES_IMPORTED:
     import NEM, Non_Existing_Module2
-    from Non_Existing_Module3 import Sub1, Sub2
     import Non_Existing_Module4
     from PIL import Image, ImageCms
 

@@ -23,10 +23,11 @@ FilePrinter - writes logs into text file. By default, text file is created next 
 Initialise dependencies. Already installed modules will be imported during initialisation.
 ```
     dependency_handler.init([('PIL', 'Pillow'), 'AnyModule'], module_globals=globals(), printers=[BlenderPrinter("Dependency Log of My Addon"), FilePrinter()])
-    FROM('PIL').IMPORT('ImageCms', 'Image') # or FROM(('PIL', 'Pillow')).IMPORT('ImageCms', 'Image')
+    FROM(('PIL', 'Pillow', ("9.2.0",))).IMPORT('Image', 'ImageCms')
     IMPORT('AnyModule2')
+    IMPORT(('AnyModule3', ("1.0.1", "1.5.0")))
 ```
-Dependencies can be initialised by init, FROM and IMPORT functions. Use tuple (module_name, pip_name) for modules that need different names for pip installing and importing.
+Dependencies can be initialised by init, FROM and IMPORT functions. Use tuple (module_name [ , pip_name ] [ , (min_version, max_version) ] ) for modules that need different names for pip installing and importing or specific version.
 Pass globals() as a module_globals parameter to import modules into global namespace.
 State of all dependencies can be tracked by dependency_handler.check_all_loaded() function returning True if all dependencies are imported.
 ```    
