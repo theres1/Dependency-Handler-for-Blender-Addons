@@ -375,8 +375,7 @@ def check_module_upgrades_thread(gui_ops_tuple=None, *, _force_check=False):
     doing_something = False
     _refresh_gui()
     if _should_check_on_start(addon_prefs) and _should_show_popup_on_start(addon_prefs):
-        deps = {d.pip_name for d in get_all_dependiencies().values()}
-        installed_modules = set(updatable_modules.keys()) & deps
+        installed_modules = {d.pip_name for d in get_all_dependiencies().values() if d.pip_name in updatable_modules.keys() and _update_in_range(updatable_modules[d.pip_name][1], d)}
         if not installed_modules:
             return
         # open pop-up
@@ -437,11 +436,9 @@ def create_gui(layout: bpy.types.UILayout,
             sub.enabled = dep.module is not None
             subcol = sub.column(align=True)
             subcol.enabled = dep.pip_name in updatable_modules and dep.version != upd_lat
-            if dep.module is not None:
-                if vmin:
-                    subcol.enabled &= upd_lat >= vmin if vmin else True
-                if vmax:
-                    subcol.enabled &= upd_lat <= vmax if vmax else True
+            subcol.enabled &= _update_in_range(upd_lat, dep)
+            
+
             subcol.operator(module_update_op.bl_idname, text="Update").module_name = dep.name
             sub.operator(module_list_versions_op.bl_idname, text="", icon="THREE_DOTS").module_name = dep.name
 
@@ -454,6 +451,20 @@ def create_gui(layout: bpy.types.UILayout,
         col.prop(addon_prefs, 'dependencies_check_on_start')
     if hasattr(addon_prefs, 'dependencies_show_popup'):
         col.prop(addon_prefs, 'dependencies_show_popup')
+
+def _update_in_range(latest, dep):
+    if dep.module is None:
+        return False
+    vmin, vmax = dep.version_range
+    if not (vmin or vmax):
+        return True
+    
+    ret = True
+    if vmin:
+        ret &= latest >= vmin
+    if vmax:
+        ret &= latest <= vmax
+    return ret
 
 def _refresh_gui():
     def do():

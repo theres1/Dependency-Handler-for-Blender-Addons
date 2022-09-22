@@ -22,7 +22,7 @@ dp.init(
     printers=[BlenderPrinter(f"Dependency Log of {bl_info['name']}"),
     ])
 IMPORT(('Non_Existing_Module4', ("1.5.0", None)))
-FROM(('PIL', 'Pillow', ("9.2.0",))).IMPORT('Image', 'ImageCms')
+FROM(('PIL', 'Pillow', ("9.2.0", "9.1.9"))).IMPORT('Image', 'ImageCms')
 
 dp.check_all_loaded()
 
@@ -56,8 +56,8 @@ class PREFS_PT_DepAddonExample(bpy.types.AddonPreferences):
     
     # Add these optional properties to the addon preferences, if you want these functionalities turned on.
     # Check-for-updates-on-start and pop-up notification will be disabled without them.
-    dependencies_check_on_start: bpy.props.BoolProperty(default=False, name="Check for module updates on start")
-    dependencies_show_popup: bpy.props.BoolProperty(default=False, name="Show pop-up notification.")
+    dependencies_check_on_start: bpy.props.BoolProperty(default=True, name="Check for module updates on start")
+    dependencies_show_popup: bpy.props.BoolProperty(default=True, name="Show pop-up notification.")
     
     def draw(self, context):
         layout = self.layout
