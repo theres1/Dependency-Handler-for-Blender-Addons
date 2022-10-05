@@ -1,12 +1,22 @@
+'''
+This submodule contains BlenderPrinter implementation and utilities to invoke subprocesses and print their output in a thread-safe way.
+Helper utilities:
+@threaded: decorator to run functions in a new thread
+run_in_main_thread: function that takes a callback function that will be safely run in the Blender main thread
+execute_process: function to run subprocess and log its output
+TaskQueue: a class to create a queue of ordered tasks that will run in a new thread
+'''
+from functools import partial
 import queue
 import site
 import subprocess
 import sys
 import threading
+from time import sleep
 from typing import Callable
 import bpy
 from . import PrinterInterface, install_all_generator, list_module_updates, FROM
-from . import restart_needed
+from . import restart_needed, _log
 # from . import deepreload
 
 class BlenderPrinter(PrinterInterface):
@@ -59,7 +69,7 @@ class BlenderPrinter(PrinterInterface):
     @PrinterInterface.catch_exceptions(use_fallback_log=True)
     def finish(self):
         self.log("\nPlease restart Blender and try again or save and show this log to the developer.")
-        BlenderPrinter.unregister_timer()
+        # BlenderPrinter.unregister_timer()
 
     def _get_text(self) -> bpy.types.Text:
         if self.logname in bpy.data.texts:
@@ -86,7 +96,7 @@ def fast_log(*msg):
     for printer in all_printers:
         printer.log(*msg)
 
-def install_operator_factory(bl_info_name: str) -> bpy.types.Operator:
+def install_operator_factory(bl_info_name: str, *, callback: Callable=None) -> bpy.types.Operator:
     '''Factory for operator that installs dependencies and prints logs into new window in real-time.'''
     @classmethod
     def poll(cls, context):
@@ -100,6 +110,8 @@ def install_operator_factory(bl_info_name: str) -> bpy.types.Operator:
             doing_something = True
             for _ in install_all_generator(): pass
             doing_something = False
+            run_in_main_thread(partial(callback, context))
+            BlenderPrinter.unregister_timer()
         
         BlenderPrinter.register_timer()
         # Turn-on the worker thread.
@@ -340,8 +352,11 @@ def threaded(task: Callable):
     '''Decorator. Run function in a new thread.'''
     def thread_task(*args, **kwargs):
         def worker():
-            task(*args, **kwargs)
-            run_in_main_thread(lambda: bpy.app.timers.unregister(_queued_functions_timer))
+            try:
+                task(*args, **kwargs)
+            finally:
+                run_in_main_thread(lambda: BlenderPrinter.unregister_timer())
+            # run_in_main_thread(lambda: bpy.app.timers.unregister(_queued_functions_timer))
         
         bpy.app.timers.register(_queued_functions_timer)
         threading.Thread(target=worker, daemon=True).start()
@@ -472,3 +487,64 @@ def _refresh_gui():
             for area in screen.areas:
                 area.tag_redraw()
     run_in_main_thread(do)
+
+########################################
+########### HELPER FUNCTIONS ###########
+########################################
+
+@threaded
+def execute_process(args, **kvargs):
+    '''Helper function. Run a process and log to printers.'''
+    print(args, kvargs)
+    with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True, **kvargs) as p:
+        for line in p.stdout:
+            _log('>>', line)
+
+    if p.returncode != 0:
+        _log(f"Exit code: {p.returncode}")
+        raise subprocess.CalledProcessError(p.returncode, p.args)
+
+class TaskQueue:
+    READY=0
+    WAIT=1
+    CANCELLED=2
+    def __init__(self):
+        self.tasks = []
+
+    def add_condition(self, callback):
+        '''Starting condition of the queue (like finished rendering)'''
+        def cond():
+            while True:
+                ret = callback(self)
+                match ret:
+                    case TaskQueue.READY:
+                        return
+                    case TaskQueue.WAIT:
+                        sleep(0.5)
+                    case TaskQueue.CANCELLED:
+                        return TaskQueue.CANCELLED
+        self.tasks.append(cond)
+
+    def add_task(self, callback, *args, **kvargs):
+        self.tasks.append(partial(callback, *args, **kvargs))
+
+    def add_exec(self, args, callback=None, **kvargs):
+        def task():
+            _log('Run:', args, kvargs)
+            with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True, **kvargs) as p:
+                for line in p.stdout:
+                    _log('>>', line)
+
+            if p.returncode != 0:
+                _log(f"Exit code: {p.returncode}")
+                raise subprocess.CalledProcessError(p.returncode, p.args)
+            
+            if callback:
+                callback(self)
+        self.tasks.append(task)
+    
+    @threaded
+    def run(self):
+        for task in self.tasks:
+            if task():
+                break
