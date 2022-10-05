@@ -25,7 +25,6 @@ class BlenderPrinter(PrinterInterface):
     Before printing, task queue have to be registered with register_timer(). finish() method invokes unregister_timer()
     register_timer() is not invoked in prepare() because the latter is supposed to be run in new thread.
     '''
-    area = None
 
     def __init__(self, logname):
         self.logname = logname
@@ -46,22 +45,19 @@ class BlenderPrinter(PrinterInterface):
     def log(self, *msg: list):
         msg = '\n' + " ".join(map(str, msg)).rstrip()
         def do():
-            if not (self.area and len(self.area.spaces) and self.area.type=='TEXT_EDITOR'):
-                self.area = self._create_text_window()
+            area = self._create_text_window()
             text = self._get_text()
-            self.area.spaces[0].text = text
+            area.spaces[0].text = text
             text.cursor_set(len(text.lines), character=len(text.lines[-1].body))
             text.write(msg)
         run_in_main_thread(do)
     
     @PrinterInterface.catch_exceptions(use_fallback_log=True)
     def prepare(self, clear=True):
-        BlenderPrinter.register_timer()
-        print('1', clear)
+        # BlenderPrinter.register_timer()
         clear_ = clear
         def do():
             text = self._get_text()
-            print('2', clear, clear_)
             if clear_:
                 text.clear()
         run_in_main_thread(do)
@@ -80,6 +76,12 @@ class BlenderPrinter(PrinterInterface):
             return text
     
     def _create_text_window(self)-> bpy.types.Area:
+        for window in bpy.context.window_manager.windows:
+            if len(window.screen.areas) == 1:
+                area = window.screen.areas[0]
+                if area.type == 'TEXT_EDITOR':
+                    return area
+        
         # Call user prefs window
         bpy.ops.screen.userpref_show("INVOKE_DEFAULT")
 
@@ -358,7 +360,8 @@ def threaded(task: Callable):
                 run_in_main_thread(lambda: BlenderPrinter.unregister_timer())
             # run_in_main_thread(lambda: bpy.app.timers.unregister(_queued_functions_timer))
         
-        bpy.app.timers.register(_queued_functions_timer)
+        # bpy.app.timers.register(_queued_functions_timer)
+        BlenderPrinter.register_timer()
         threading.Thread(target=worker, daemon=True).start()
 
     return thread_task
@@ -530,9 +533,11 @@ class TaskQueue:
 
     def add_exec(self, args, callback=None, **kvargs):
         def task():
+            # print('Run:', args, kvargs)
             _log('Run:', args, kvargs)
             with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True, **kvargs) as p:
                 for line in p.stdout:
+                    # print(line)
                     _log('>>', line)
 
             if p.returncode != 0:

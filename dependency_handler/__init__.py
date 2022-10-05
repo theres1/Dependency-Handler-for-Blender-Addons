@@ -349,7 +349,7 @@ class ConsolePrinter(PrinterInterface):
     
     @PrinterInterface.catch_exceptions(use_fallback_log=True)
     def log(self, *msg: list):
-        msg = " ".join(map(str, map(str, msg)))
+        msg = " ".join(map(str, map(str, msg))).rstrip()
         print(msg)
     
     @PrinterInterface.catch_exceptions(use_fallback_log=True)
@@ -371,7 +371,7 @@ class FilePrinter(PrinterInterface):
 
     @PrinterInterface.catch_exceptions(use_fallback_log=True)
     def log(self, *msg: list):
-        msg = '\n' + " ".join(map(str, map(str, msg))).rstrip()
+        msg = " ".join(map(str, map(str, msg))).rstrip() + '\n'
         with open(self.filepath, 'a') as f:
             f.write(msg)
     
