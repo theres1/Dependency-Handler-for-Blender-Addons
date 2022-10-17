@@ -64,8 +64,9 @@ class BlenderPrinter(PrinterInterface):
 
     @PrinterInterface.catch_exceptions(use_fallback_log=True)
     def finish(self):
-        self.log("\nPlease restart Blender and try again or save and show this log to the developer.")
+        # self.log("\nPlease restart Blender and try again or save and show this log to the developer.")
         # BlenderPrinter.unregister_timer()
+        pass
 
     def _get_text(self) -> bpy.types.Text:
         if self.logname in bpy.data.texts:

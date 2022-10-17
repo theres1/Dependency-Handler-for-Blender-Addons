@@ -231,6 +231,7 @@ class Dependency:
             return True
         except ModuleNotFoundError:
             estr = f'{self.pip_name} installation finished but {self.name} import failed. Try restarting Blender.'
+            restart_needed(True)
             _log(estr)
         
         return False
@@ -438,6 +439,7 @@ def install_all_generator():
     for printer in all_printers:
         printer.prepare()
     
+    success = True
     try:
         for dependency in all_dependencies.values():
             yield from dependency.install_me()
@@ -447,39 +449,42 @@ def install_all_generator():
             if restart_needed():
                 _log("\n", "Modules need to be reloaded. Please restart Blender.")
             return True
-    except SubModuleNotFound as e:
-        raise
-    except ModuleFatalException as e:
+        success = False
+    except (SubModuleNotFound, ModuleFatalException) as e:
+        success = False
         raise
     except Exception as e:
+        success = False
         _log(e)
         raise
     finally:
-        _log('\n\n ------ System Info ------\n')
-        try:
-            # try to get Blender info if the module is run in its environment
-            import bpy
-            _log('\nBlender info:')
-            _log(f' bpy.app.version: {bpy.app.version}')
-            _log(f' Addon Name: {other_globals["bl_info"]["name"]}')
-            _log(f' Addon Version: {other_globals["bl_info"]["version"]}')
-            _log(f' bpy.app.binary_path: {bpy.app.binary_path}')
-            _log('\n')
-        except:
-            pass
+        if not success:
+            _log('\n\n ------ System Info ------\n')
+            try:
+                # try to get Blender info if the module is run in its environment
+                import bpy
+                _log('\nBlender info:')
+                _log(f' bpy.app.version: {bpy.app.version}')
+                _log(f' Addon Name: {other_globals["bl_info"]["name"]}')
+                _log(f' Addon Version: {other_globals["bl_info"]["version"]}')
+                _log(f' bpy.app.binary_path: {bpy.app.binary_path}')
+                _log('\n')
+            except:
+                pass
 
-        import platform
-        _log(f' sys.executable: {sys.executable}')
-        _log('\nImported modules:')
-        for dep in all_dependencies.values():
-            if dep.imported:
-                _log(f' {dep.name}: {importlib.import_module(dep.name)}')
-        _log(f'\n platform.machine: {platform.machine()}')
-        _log(f' platform.platform: {platform.platform()}')
-        _log(f' platform.platform: {platform.platform()}')
-        _log(f' platform.processor: {platform.processor()}')
+            import platform
+            _log(f' sys.executable: {sys.executable}')
+            _log('\nImported modules:')
+            for dep in all_dependencies.values():
+                if dep.imported:
+                    _log(f' {dep.name}: {importlib.import_module(dep.name)}')
+            _log(f'\n platform.machine: {platform.machine()}')
+            _log(f' platform.platform: {platform.platform()}')
+            _log(f' platform.platform: {platform.platform()}')
+            _log(f' platform.processor: {platform.processor()}')
 
-        _log("\n\n---------- Installation Failed ----------")
+            _log("\n\n---------- Installation Failed ----------")
+            _log("\nPlease restart Blender and try again or show this log to the developer.")
 
         for printer in all_printers:
             printer.finish()
