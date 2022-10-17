@@ -170,7 +170,7 @@ def gui_operators_factory(bl_info_name: str):
                     dependency = FROM(module_name)
                     doing_what = "Updating module... Please wait..."
                     package_name = dependency.pip_name
-                    match self.version_range:
+                    match dependency.version_range:
                         case (str(), None):
                             package_name += f'>={dependency.version_range[0]}'
                         case (None, str()):
